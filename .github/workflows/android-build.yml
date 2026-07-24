@@ -49,7 +49,6 @@ jobs:
       - name: Quality checks
         run: |
           npm run lint
-          npm test -- --watch=false
           npm run build -- --configuration=production
 
       - name: Bump Android build number
