@@ -73,6 +73,8 @@ Generate the signing key in a trusted WSL2 shell:
 
 ```bash
 npm run generate-keystore
+# or
+npm run generate-keystore -- --password 'YOUR_STORE_PASSWORD'
 test -s release-keystore.jks && base64 -w 0 release-keystore.jks > keystore.b64.txt
 ```
 
