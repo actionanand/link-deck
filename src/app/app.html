@@ -1,44 +1,931 @@
-<style>
-  :host {
-    display: block;
-    min-height: 100dvh;
-    color: #17202a;
-    background: #f6f8fb;
-    font-family: Arial, Helvetica, sans-serif;
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+@if (!store.ready()) {
+  <main class="splash" aria-live="polite">
+    <img ngSrc="link-deck.png" width="104" height="104" alt="" priority />
+    <strong>LinkDeck</strong>
+    <span>Preparing your bookmarks…</span>
+  </main>
+} @else if (store.locked()) {
+  <main class="lock-screen">
+    <section class="lock-card" aria-labelledby="lock-title">
+      <img ngSrc="link-deck.png" width="88" height="88" alt="" priority />
+      <h1 id="lock-title">Welcome back</h1>
+      <p>Enter your LinkDeck PIN to continue.</p>
+      <label for="unlock-pin">Application PIN</label>
+      <input
+        id="unlock-pin"
+        type="password"
+        inputmode="numeric"
+        autocomplete="current-password"
+        maxlength="8"
+        [ngModel]="pin()"
+        (ngModelChange)="pin.set($event)"
+        (keyup.enter)="unlock()"
+      />
+      @if (error()) {
+        <p class="error" role="alert">{{ error() }}</p>
+      }
+      <button class="primary" type="button" (click)="unlock()">Unlock</button>
+      @if (store.settings().biometricEnabled) {
+        <button class="secondary" type="button" [disabled]="busy()" (click)="biometric('unlock')">
+          <span class="material-symbols-rounded" aria-hidden="true">fingerprint</span>
+          Use fingerprint
+        </button>
+      }
+    </section>
+  </main>
+} @else {
+  <div class="app-shell">
+    <header class="topbar">
+      <button
+        class="icon-button menu-button"
+        type="button"
+        aria-label="Open navigation"
+        (click)="showDrawer.set(true)"
+      >
+        <span class="material-symbols-rounded" aria-hidden="true">menu</span>
+      </button>
+      <a class="brand" href="/" aria-label="LinkDeck home">
+        <img ngSrc="link-deck.png" width="40" height="40" alt="" priority />
+        <span>LinkDeck</span>
+      </a>
+      <label class="search">
+        <span class="material-symbols-rounded" aria-hidden="true">search</span>
+        <span class="visually-hidden">Search bookmarks</span>
+        <input
+          type="search"
+          placeholder="Search everything"
+          [ngModel]="query()"
+          (ngModelChange)="query.set($event)"
+        />
+      </label>
+      <button
+        class="icon-button topbar-settings"
+        type="button"
+        aria-label="Open settings"
+        (click)="navigate('settings')"
+      >
+        <span class="material-symbols-rounded" aria-hidden="true">settings</span>
+      </button>
+    </header>
+
+    @if (showDrawer()) {
+      <button
+        class="scrim"
+        type="button"
+        aria-label="Close navigation"
+        (click)="showDrawer.set(false)"
+      ></button>
+    }
+    <aside class="drawer" [class.open]="showDrawer()" aria-label="Main navigation">
+      <div class="drawer-brand">
+        <img ngSrc="link-deck.png" width="48" height="48" alt="" />
+        <div><strong>LinkDeck</strong><small>Your links, beautifully organised</small></div>
+      </div>
+      <nav>
+        @for (
+          item of [
+            ['bookmarks', 'bookmarks', 'Bookmarks'],
+            ['profiles', 'account_circle', 'Profiles'],
+            ['favourites', 'star', 'Favourites'],
+            ['tags', 'sell', 'Tags'],
+            ['transfer', 'import_export', 'Import & export'],
+            ['trash', 'delete', 'Trash'],
+            ['information', 'info', 'Information'],
+            ['settings', 'settings', 'Settings'],
+          ];
+          track item[0]
+        ) {
+          <button
+            type="button"
+            [class.active]="page() === item[0]"
+            (click)="navigate($any(item[0]))"
+          >
+            <span class="material-symbols-rounded" aria-hidden="true">{{ item[1] }}</span
+            >{{ item[2] }}
+          </button>
+        }
+      </nav>
+    </aside>
+
+    <main id="main-content" class="content" tabindex="-1">
+      @if (page() === 'settings') {
+        <header class="page-heading">
+          <div>
+            <p class="eyebrow">Preferences</p>
+            <h1>Settings</h1>
+            <p>Appearance, security and local data.</p>
+          </div>
+        </header>
+        <section class="settings-grid">
+          <article class="panel">
+            <h2>
+              <span class="material-symbols-rounded" aria-hidden="true">palette</span>Appearance
+            </h2>
+            <p>Choose how LinkDeck matches your device.</p>
+            <div class="segmented" aria-label="Theme">
+              @for (
+                theme of [
+                  ['light', 'light_mode', 'Light'],
+                  ['dark', 'dark_mode', 'Dark'],
+                  ['system', 'devices', 'System'],
+                ];
+                track theme[0]
+              ) {
+                <button
+                  type="button"
+                  [class.selected]="store.settings().theme === theme[0]"
+                  (click)="selectTheme($any(theme[0]))"
+                >
+                  <span class="material-symbols-rounded" aria-hidden="true">{{ theme[1] }}</span
+                  >{{ theme[2] }}
+                </button>
+              }
+            </div>
+          </article>
+          <article class="panel">
+            <h2>
+              <span class="material-symbols-rounded" aria-hidden="true">lock</span>App protection
+            </h2>
+            <p>Protect LinkDeck with a numeric PIN whenever you leave or reopen the app.</p>
+            @if (store.settings().pinEnabled) {
+              <div class="status-row">
+                <span>PIN protection</span><strong class="on">On</strong>
+              </div>
+              <button class="secondary" type="button" (click)="security.lock()">Lock now</button>
+              <button class="text-button danger" type="button" (click)="openDialog('remove-pin')">
+                Remove PIN
+              </button>
+            } @else {
+              <button class="primary" type="button" (click)="openDialog('pin')">
+                Set application PIN
+              </button>
+            }
+          </article>
+          <article class="panel">
+            <h2>
+              <span class="material-symbols-rounded" aria-hidden="true">fingerprint</span
+              >Fingerprint login
+            </h2>
+            <p>
+              Unlock LinkDeck with your fingerprint or device biometrics. Your application PIN
+              remains available as a fallback.
+            </p>
+            @if (!store.settings().pinEnabled) {
+              <small>Set an application PIN first.</small>
+            } @else if (store.settings().biometricEnabled) {
+              <div class="status-row">
+                <span>Biometric login</span><strong class="on">On</strong>
+              </div>
+            } @else {
+              <button
+                class="secondary"
+                type="button"
+                [disabled]="!security.biometricAvailable()"
+                (click)="openDialog('biometric')"
+              >
+                Enable fingerprint
+              </button>
+              @if (!security.biometricAvailable()) {
+                <small>Available in the Android app when a strong biometric is enrolled.</small>
+              }
+            }
+          </article>
+          <article class="panel">
+            <h2>
+              <span class="material-symbols-rounded" aria-hidden="true">offline_bolt</span>Offline
+              data
+            </h2>
+            <p>Your bookmarks stay private on this device and remain available without internet.</p>
+            <strong
+              >{{ store.bookmarks().length }} bookmarks ·
+              {{ store.profiles().length }} profiles</strong
+            >
+          </article>
+        </section>
+      } @else if (page() === 'transfer') {
+        <header class="page-heading">
+          <div>
+            <p class="eyebrow">Portable by design</p>
+            <h1>Import & export</h1>
+            <p>Move between browsers or create a complete app backup.</p>
+          </div>
+        </header>
+        <section class="transfer-grid">
+          <article class="panel hero-panel">
+            <span class="material-symbols-rounded feature-icon" aria-hidden="true"
+              >shield_lock</span
+            >
+            <h2>Complete app backup</h2>
+            <p>
+              Preserves profiles, nested folders, notes, tags, history, favourites and settings.
+              Encryption is optional.
+            </p>
+            <div class="button-row">
+              <button class="primary" type="button" (click)="openDialog('backup')">
+                Create backup
+              </button>
+              <input
+                #restoreInput
+                class="visually-hidden"
+                type="file"
+                accept=".linkdeck,.json,application/json"
+                (change)="selectRestoreFile($event)"
+              />
+              <button class="secondary" type="button" (click)="chooseFile(restoreInput)">
+                Restore backup
+              </button>
+            </div>
+          </article>
+          <article class="panel">
+            <span class="material-symbols-rounded feature-icon" aria-hidden="true">language</span>
+            <h2>Browser bookmark HTML</h2>
+            <p>
+              Compatible with Chrome, Edge and Firefox. Browser HTML is never encrypted and excludes
+              app-only metadata.
+            </p>
+            <input
+              #htmlInput
+              class="visually-hidden"
+              type="file"
+              accept=".html,.htm,text/html"
+              (change)="selectImportFile($event)"
+            />
+            <button class="secondary" type="button" (click)="chooseFile(htmlInput)">
+              Import HTML
+            </button>
+            <div class="export-options">
+              <button class="text-button" type="button" (click)="exportProfile(true)">
+                Export as toolbar folder
+              </button>
+              <button class="text-button" type="button" (click)="exportProfile(false)">
+                Export as normal folder
+              </button>
+            </div>
+          </article>
+        </section>
+      } @else if (page() === 'information') {
+        <header class="page-heading">
+          <div>
+            <p class="eyebrow">Help centre</p>
+            <h1>Information</h1>
+            <p>Everything you need to move and manage bookmarks safely.</p>
+          </div>
+        </header>
+        <section class="info-layout">
+          <article class="info-hero">
+            <span class="material-symbols-rounded" aria-hidden="true">bookmark_manager</span>
+            <div>
+              <h2>Your web, organised around you</h2>
+              <p>
+                Keep Personal, Office, Learning and Recipe links separate with profiles, then use
+                unlimited nested folders, tags, favourites, notes, archive and trash.
+              </p>
+            </div>
+          </article>
+
+          <section class="info-section" aria-labelledby="portable-title">
+            <header>
+              <span class="material-symbols-rounded" aria-hidden="true">swap_horiz</span>
+              <div>
+                <small>PORTABLE FORMAT</small>
+                <h2 id="portable-title">Browser bookmark HTML</h2>
+              </div>
+            </header>
+            <p>
+              Netscape Bookmark HTML is the long-established interchange format used by major
+              browsers. It stores folders in <code>H3</code>, links in <code>A HREF</code>, and
+              hierarchy in nested <code>DL</code> lists.
+            </p>
+            <div class="info-note">
+              <span class="material-symbols-rounded" aria-hidden="true">info</span>
+              <p>
+                <code>PERSONAL_TOOLBAR_FOLDER="true"</code> marks the browser toolbar. This is an
+                interchange file, not a normal webpage for manual editing.
+              </p>
+            </div>
+          </section>
+
+          <section class="browser-guide" aria-labelledby="browser-title">
+            <h2 id="browser-title">Import or export in your browser</h2>
+            <article>
+              <span class="browser-mark">C</span>
+              <div>
+                <h3>Google Chrome</h3>
+                <p>
+                  Open Bookmark Manager with <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> or
+                  <code>chrome://bookmarks/</code>. Open the three-dot menu and choose Import
+                  bookmarks or Export bookmarks.
+                </p>
+              </div>
+            </article>
+            <article>
+              <span class="browser-mark edge">E</span>
+              <div>
+                <h3>Microsoft Edge</h3>
+                <p>
+                  Open Favorites with <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> or
+                  <code>edge://favorites/</code>. Use the Favorites page menu to import or export.
+                </p>
+              </div>
+            </article>
+          </section>
+
+          <section class="info-section shortcuts" aria-labelledby="shortcuts-title">
+            <header>
+              <span class="material-symbols-rounded" aria-hidden="true">keyboard</span>
+              <div>
+                <small>QUICK REFERENCE</small>
+                <h2 id="shortcuts-title">Common shortcuts</h2>
+              </div>
+            </header>
+            <dl>
+              <div>
+                <dt>Ctrl+D</dt>
+                <dd>Save the current page</dd>
+              </div>
+              <div>
+                <dt>Ctrl+Shift+D</dt>
+                <dd>Save all open tabs into a folder</dd>
+              </div>
+              <div>
+                <dt>Ctrl+Shift+O</dt>
+                <dd>Open Bookmark or Favorites Manager</dd>
+              </div>
+              <div>
+                <dt>Ctrl+Shift+B</dt>
+                <dd>Show or hide the bookmarks bar</dd>
+              </div>
+            </dl>
+            <small>Shortcuts may vary by browser, operating system or browser version.</small>
+          </section>
+
+          <section class="info-warning" aria-labelledby="warning-title">
+            <span class="material-symbols-rounded" aria-hidden="true">shield_lock</span>
+            <div>
+              <h2 id="warning-title">Choose the right export</h2>
+              <p>
+                Browser HTML is unencrypted and may omit notes, tags and visit history. Use an
+                encrypted LinkDeck backup when you need a complete restoration.
+              </p>
+            </div>
+          </section>
+        </section>
+      } @else if (page() === 'profiles') {
+        <header class="page-heading">
+          <div>
+            <p class="eyebrow">Spaces for every context</p>
+            <h1>Profiles</h1>
+            <p>Each profile keeps its own folders and bookmarks.</p>
+          </div>
+          <button
+            class="primary"
+            type="button"
+            (click)="profileName.set(''); openDialog('profile')"
+          >
+            <span class="material-symbols-rounded" aria-hidden="true">add</span>New profile
+          </button>
+        </header>
+        <section class="profile-grid">
+          @for (profile of store.profiles(); track profile.id) {
+            <article class="profile-card">
+              <button class="profile-card-main" type="button" (click)="selectProfile(profile.id)">
+                <span class="profile-icon material-symbols-rounded" aria-hidden="true"
+                  >folder_special</span
+                >
+                <span
+                  ><strong>{{ profile.name }}</strong
+                  ><small>{{ profileBookmarkCount(profile.id) }} bookmarks</small></span
+                >
+                @if (profile.isDefault) {
+                  <span class="badge">Default</span>
+                }
+              </button>
+              <div class="profile-actions">
+                @if (!profile.isDefault) {
+                  <button
+                    type="button"
+                    aria-label="Make default profile"
+                    (click)="makeDefaultProfile(profile.id)"
+                  >
+                    <span class="material-symbols-rounded" aria-hidden="true">check_circle</span>
+                  </button>
+                }
+                <button
+                  type="button"
+                  aria-label="Rename profile"
+                  (click)="renameProfile(profile.id)"
+                >
+                  <span class="material-symbols-rounded" aria-hidden="true">edit</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Duplicate profile"
+                  (click)="duplicateProfile(profile.id)"
+                >
+                  <span class="material-symbols-rounded" aria-hidden="true">content_copy</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Move profile earlier"
+                  (click)="reorderProfile(profile.id, -1)"
+                >
+                  <span class="material-symbols-rounded" aria-hidden="true">arrow_upward</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Move profile later"
+                  (click)="reorderProfile(profile.id, 1)"
+                >
+                  <span class="material-symbols-rounded" aria-hidden="true">arrow_downward</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Export profile"
+                  (click)="portability.exportProfile(profile.id, false)"
+                >
+                  <span class="material-symbols-rounded" aria-hidden="true">download</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Delete profile"
+                  [disabled]="profile.isDefault"
+                  (click)="deleteProfile(profile.id)"
+                >
+                  <span class="material-symbols-rounded" aria-hidden="true">delete</span>
+                </button>
+              </div>
+            </article>
+          }
+        </section>
+      } @else {
+        <header class="page-heading" [class.bookmarks-heading]="page() === 'bookmarks'">
+          @if (page() === 'bookmarks') {
+            <div class="curated-summary">
+              <p class="eyebrow bookmarks-eyebrow">Your curated web</p>
+              <p>
+                {{ visibleBookmarks().length }}
+                {{ visibleBookmarks().length === 1 ? 'bookmark' : 'bookmarks' }}
+              </p>
+            </div>
+            <div class="profile-summary">
+              <app-select-picker
+                class="profile-picker"
+                [compact]="true"
+                [value]="store.selectedProfileId()"
+                [options]="profileOptions()"
+                sheetTitle="Choose profile"
+                (valueChange)="selectProfile($event)"
+              />
+            </div>
+          } @else {
+            <div>
+              <p class="eyebrow">
+                {{
+                  page() === 'favourites'
+                    ? 'Saved for later'
+                    : page() === 'trash'
+                      ? 'Recover or remove'
+                      : 'Browse by topic'
+                }}
+              </p>
+              <h1>
+                {{ page() === 'favourites' ? 'Favourites' : page() === 'trash' ? 'Trash' : 'Tags' }}
+              </h1>
+              <p>
+                {{ visibleBookmarks().length }}
+                {{ visibleBookmarks().length === 1 ? 'bookmark' : 'bookmarks' }}
+              </p>
+            </div>
+          }
+        </header>
+        @if (page() === 'tags') {
+          <div class="tag-cloud">
+            @for (tag of tagSummary(); track tag[0]) {
+              <button type="button" (click)="query.set(tag[0])">
+                <span class="material-symbols-rounded" aria-hidden="true">sell</span>{{ tag[0] }}
+                <small>{{ tag[1] }}</small>
+              </button>
+            }
+          </div>
+        }
+        @if (page() === 'bookmarks') {
+          <nav class="breadcrumbs" aria-label="Folder path">
+            @for (crumb of breadcrumbs(); track crumb.id) {
+              <button type="button" (click)="store.selectedFolderId.set(crumb.id)">
+                {{ crumb.name }}</button
+              ><span aria-hidden="true">/</span>
+            }
+          </nav>
+          <div class="folder-tools">
+            <button
+              class="secondary"
+              type="button"
+              (click)="folderName.set(''); openDialog('folder')"
+            >
+              <span class="material-symbols-rounded" aria-hidden="true">create_new_folder</span>New
+              folder
+            </button>
+          </div>
+          @if (visibleFolders().length) {
+            <section class="folder-row" aria-label="Folders">
+              @for (folder of visibleFolders(); track folder.id) {
+                <button type="button" (click)="store.selectedFolderId.set(folder.id)">
+                  <span class="material-symbols-rounded" aria-hidden="true">folder</span
+                  ><strong>{{ folder.name }}</strong>
+                </button>
+              }
+            </section>
+          }
+        }
+        <div class="toolbar">
+          <label
+            ><input
+              type="checkbox"
+              [checked]="allProfiles()"
+              (change)="allProfiles.set(!allProfiles())"
+            />Search all profiles</label
+          >
+          <div class="view-toggle">
+            <button
+              type="button"
+              aria-label="List view"
+              [class.active]="store.settings().viewMode === 'list'"
+              (click)="store.updateSettings({ viewMode: 'list' })"
+            >
+              <span class="material-symbols-rounded" aria-hidden="true">view_list</span>
+            </button>
+            <button
+              type="button"
+              aria-label="Grid view"
+              [class.active]="store.settings().viewMode === 'grid'"
+              (click)="store.updateSettings({ viewMode: 'grid' })"
+            >
+              <span class="material-symbols-rounded" aria-hidden="true">grid_view</span>
+            </button>
+          </div>
+        </div>
+        @if (visibleBookmarks().length) {
+          <section
+            class="bookmark-collection"
+            [class.list]="store.settings().viewMode === 'list'"
+            aria-label="Bookmarks"
+          >
+            @for (bookmark of visibleBookmarks(); track bookmark.id) {
+              <article class="bookmark-card">
+                <button class="bookmark-main" type="button" (click)="openBookmark(bookmark)">
+                  <img [src]="bookmark.favicon" width="44" height="44" alt="" />
+                  <span
+                    ><strong>{{ bookmark.title }}</strong
+                    ><small>{{ bookmark.url }}</small
+                    ><span class="tags">
+                      @for (tag of bookmark.tags; track tag) {
+                        <span>{{ tag }}</span>
+                      }
+                    </span></span
+                  >
+                </button>
+                <div class="card-actions">
+                  @if (page() === 'trash') {
+                    <button
+                      type="button"
+                      aria-label="Restore bookmark"
+                      (click)="restoreBookmark(bookmark)"
+                    >
+                      <span class="material-symbols-rounded" aria-hidden="true">restore</span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Delete permanently"
+                      (click)="deletePermanently(bookmark)"
+                    >
+                      <span class="material-symbols-rounded" aria-hidden="true"
+                        >delete_forever</span
+                      >
+                    </button>
+                  } @else {
+                    <button
+                      type="button"
+                      [attr.aria-label]="
+                        bookmark.favourite ? 'Remove from favourites' : 'Add to favourites'
+                      "
+                      (click)="toggleFavourite(bookmark)"
+                    >
+                      <span
+                        class="material-symbols-rounded"
+                        [class.filled]="bookmark.favourite"
+                        aria-hidden="true"
+                        >star</span
+                      >
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Move to trash"
+                      (click)="moveToTrash(bookmark)"
+                    >
+                      <span class="material-symbols-rounded" aria-hidden="true">delete</span>
+                    </button>
+                  }
+                </div>
+              </article>
+            }
+          </section>
+        } @else {
+          <section class="empty-state">
+            <span class="material-symbols-rounded" aria-hidden="true">bookmarks</span>
+            <h2>No bookmarks here yet</h2>
+            <p>Add a useful link or import your browser bookmarks.</p>
+            @if (page() !== 'trash') {
+              <button class="primary" type="button" (click)="openAddBookmark()">
+                Add your first bookmark
+              </button>
+            }
+          </section>
+        }
+      }
+    </main>
+
+    <nav class="bottom-nav" aria-label="Quick navigation">
+      @for (
+        item of [
+          ['bookmarks', 'bookmarks', 'Bookmarks'],
+          ['profiles', 'account_circle', 'Profiles'],
+          ['favourites', 'star', 'Favourites'],
+          ['settings', 'settings', 'Settings'],
+        ];
+        track item[0]
+      ) {
+        <button type="button" [class.active]="page() === item[0]" (click)="navigate($any(item[0]))">
+          <span class="material-symbols-rounded" aria-hidden="true">{{ item[1] }}</span
+          >{{ item[2] }}
+        </button>
+      }
+    </nav>
+    <button class="fab" type="button" aria-label="Add bookmark" (click)="openAddBookmark()">
+      <span class="material-symbols-rounded" aria-hidden="true">add</span>
+    </button>
+  </div>
+
+  @if (dialog()) {
+    <button
+      class="dialog-scrim"
+      type="button"
+      aria-label="Close dialog"
+      (click)="closeDialog()"
+    ></button>
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <header>
+        <h2 id="dialog-title">
+          @switch (dialog()) {
+            @case ('bookmark') {
+              Add bookmark
+            }
+            @case ('folder') {
+              New folder
+            }
+            @case ('profile') {
+              New profile
+            }
+            @case ('backup') {
+              Create backup
+            }
+            @case ('restore') {
+              Restore backup
+            }
+            @case ('import') {
+              Import preview
+            }
+            @case ('pin') {
+              Set application PIN
+            }
+            @case ('remove-pin') {
+              Remove PIN
+            }
+            @case ('biometric') {
+              Enable fingerprint
+            }
+          }
+        </h2>
+        <button class="icon-button" type="button" aria-label="Close" (click)="closeDialog()">
+          <span class="material-symbols-rounded" aria-hidden="true">close</span>
+        </button>
+      </header>
+      @switch (dialog()) {
+        @case ('bookmark') {
+          <label
+            >URL
+            <div class="input-action">
+              <input
+                type="url"
+                autocomplete="url"
+                placeholder="https://example.com"
+                [ngModel]="bookmarkUrl()"
+                (ngModelChange)="bookmarkUrl.set($event)"
+              />
+              <button class="secondary" type="button" (click)="pasteUrl()">Paste</button>
+            </div>
+          </label>
+          <label
+            >Title<input
+              type="text"
+              [ngModel]="bookmarkTitle()"
+              (ngModelChange)="bookmarkTitle.set($event)"
+          /></label>
+          <div class="field-row">
+            <div class="field-label">
+              <span>Profile</span>
+              <app-select-picker
+                [value]="bookmarkProfileId()"
+                [options]="profileOptions()"
+                sheetTitle="Choose bookmark profile"
+                (valueChange)="bookmarkProfileId.set($event); bookmarkFolderId.set(null)"
+              />
+            </div>
+            <div class="field-label">
+              <span>Folder</span>
+              <app-select-picker
+                [value]="bookmarkFolderId() ?? ''"
+                [options]="folderOptions()"
+                sheetTitle="Choose folder"
+                (valueChange)="bookmarkFolderId.set($event || null)"
+              />
+            </div>
+          </div>
+          <label
+            >Notes<textarea
+              rows="3"
+              [ngModel]="bookmarkNotes()"
+              (ngModelChange)="bookmarkNotes.set($event)"
+            ></textarea>
+          </label>
+          <label
+            >Tags <small>Comma separated</small
+            ><input
+              type="text"
+              [ngModel]="bookmarkTags()"
+              (ngModelChange)="bookmarkTags.set($event)"
+          /></label>
+          <button class="primary full" type="button" (click)="saveBookmark()">Save bookmark</button>
+        }
+        @case ('folder') {
+          <label
+            >Folder name<input
+              type="text"
+              autocomplete="off"
+              [ngModel]="folderName()"
+              (ngModelChange)="folderName.set($event)" /></label
+          ><button class="primary full" type="button" (click)="saveFolder()">Create folder</button>
+        }
+        @case ('profile') {
+          <label
+            >Profile name<input
+              type="text"
+              autocomplete="off"
+              [ngModel]="profileName()"
+              (ngModelChange)="profileName.set($event)" /></label
+          ><button class="primary full" type="button" (click)="saveProfile()">
+            Create profile
+          </button>
+        }
+        @case ('pin') {
+          <p>Choose a numeric PIN with 4 to 8 digits.</p>
+          <label
+            >New PIN<input
+              type="password"
+              inputmode="numeric"
+              maxlength="8"
+              [ngModel]="pin()"
+              (ngModelChange)="pin.set($event)" /></label
+          ><label
+            >Confirm PIN<input
+              type="password"
+              inputmode="numeric"
+              maxlength="8"
+              [ngModel]="pinConfirmation()"
+              (ngModelChange)="pinConfirmation.set($event)" /></label
+          ><button class="primary full" type="button" (click)="savePin()">Enable PIN</button>
+        }
+        @case ('remove-pin') {
+          <p>Enter your current PIN to remove application protection and fingerprint login.</p>
+          <label
+            >Current PIN<input
+              type="password"
+              inputmode="numeric"
+              maxlength="8"
+              [ngModel]="pin()"
+              (ngModelChange)="pin.set($event)" /></label
+          ><button class="danger-button full" type="button" (click)="removePin()">
+            Remove PIN
+          </button>
+        }
+        @case ('biometric') {
+          <p>Enter the current PIN, then confirm using Android’s biometric prompt.</p>
+          <label
+            >Current PIN<input
+              type="password"
+              inputmode="numeric"
+              maxlength="8"
+              [ngModel]="pin()"
+              (ngModelChange)="pin.set($event)" /></label
+          ><button
+            class="primary full"
+            type="button"
+            [disabled]="busy()"
+            (click)="biometric('enable')"
+          >
+            Enable fingerprint login
+          </button>
+        }
+        @case ('backup') {
+          <label class="check-row"
+            ><input
+              type="checkbox"
+              [checked]="encryptBackup()"
+              (change)="encryptBackup.set(!encryptBackup())"
+            /><span
+              ><strong>Encrypt this backup</strong
+              ><small>Recommended for complete app data</small></span
+            ></label
+          >
+          @if (encryptBackup()) {
+            <label
+              >Backup passphrase<input
+                type="password"
+                autocomplete="new-password"
+                [ngModel]="passphrase()"
+                (ngModelChange)="passphrase.set($event)"
+              /><small>At least 8 characters. It cannot be recovered.</small></label
+            >
+          }
+          <button class="primary full" type="button" (click)="createBackup()">
+            Download backup
+          </button>
+        }
+        @case ('restore') {
+          <p>LinkDeck automatically detects encrypted and unencrypted backup files.</p>
+          <label
+            >Passphrase <small>Leave blank for an unencrypted backup</small
+            ><input
+              type="password"
+              autocomplete="current-password"
+              [ngModel]="passphrase()"
+              (ngModelChange)="passphrase.set($event)" /></label
+          ><button class="primary full" type="button" (click)="restoreBackup()">
+            Restore {{ restoreFile()?.name }}
+          </button>
+        }
+        @case ('import') {
+          @if (importPreview(); as preview) {
+            <div class="preview-grid">
+              <div>
+                <strong>{{ preview.bookmarks }}</strong
+                ><small>Bookmarks</small>
+              </div>
+              <div>
+                <strong>{{ preview.folders }}</strong
+                ><small>Folders</small>
+              </div>
+              <div>
+                <strong>{{ preview.duplicates }}</strong
+                ><small>Duplicates</small>
+              </div>
+            </div>
+            @if (preview.toolbarFolder) {
+              <p class="notice">
+                Toolbar folder detected: <strong>{{ preview.toolbarFolder }}</strong>
+              </p>
+            }
+          }
+          <div class="field-label">
+            <span>Destination</span>
+            <app-select-picker
+              [value]="importNewProfile() ? 'new' : 'existing'"
+              [options]="destinationOptions"
+              sheetTitle="Import destination"
+              (valueChange)="importNewProfile.set($event === 'new')"
+            />
+          </div>
+          <div class="field-label">
+            <span>Duplicate handling</span>
+            <app-select-picker
+              [value]="duplicatePolicy()"
+              [options]="duplicateOptions"
+              sheetTitle="Handle duplicate bookmarks"
+              (valueChange)="duplicatePolicy.set($any($event))"
+            />
+          </div>
+          <button class="primary full" type="button" (click)="importBookmarks()">
+            Import bookmarks
+          </button>
+        }
+      }
+      @if (error()) {
+        <p class="error" role="alert">{{ error() }}</p>
+      }
+    </section>
   }
-
-  main {
-    display: grid;
-    min-height: 100dvh;
-    place-items: center;
-    padding: 2rem;
-    text-align: center;
+  @if (message()) {
+    <div class="toast" role="status">{{ message() }}</div>
   }
-
-  .intro {
-    max-width: 36rem;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: clamp(2rem, 6vw, 4rem);
-    font-weight: 700;
-    line-height: 1.1;
-  }
-
-  p {
-    margin: 1rem 0 0;
-    color: #415164;
-    font-size: 1.125rem;
-    line-height: 1.6;
-  }
-</style>
-
-<main>
-  <section class="intro" aria-labelledby="page-title">
-    <h1 id="page-title">link-deck</h1>
-    <p>A simple default project template ready to clone and build from.</p>
-  </section>
-</main>
-
-<router-outlet />
+}

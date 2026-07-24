@@ -1,0 +1,204 @@
+name: Android APK and AAB
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main-android]
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MIN_SDK_VERSION: 24
+  TARGET_SDK_VERSION: 35
+  RELEASE_BASENAME: link-deck
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.16.0'
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install Capacitor build tools
+        run: npm install --no-save --package-lock=false @capacitor/core@8.4.2 @capacitor/android@8.4.2 @capacitor/cli@8.4.2
+
+      - name: Quality checks
+        run: |
+          npm run lint
+          npm test -- --watch=false
+          npm run build -- --configuration=production
+
+      - name: Bump Android build number
+        if: github.ref == 'refs/heads/main-android'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          node scripts/bump-android-version.js
+          VERSION_CODE=$(node -p "require('./android-version.json').versionCode")
+          git add android-version.json
+          git diff --cached --quiet || git commit -m "chore: bump Android versionCode to $VERSION_CODE [skip ci]"
+          git pull --rebase --autostash
+          git push
+
+      - name: Generate and sync Android project
+        run: |
+          npx cap add android
+          npx cap sync android
+          node scripts/patch-android.mjs
+
+      - name: Apply Android version and SDK levels
+        working-directory: android/app
+        run: |
+          VERSION_CODE=$(node -p "require('../../android-version.json').versionCode")
+          VERSION_NAME=$(node -p "require('../../android-version.json').versionName")
+          sed -i 's/versionCode [0-9]*/versionCode project.hasProperty("versionCode") ? project.versionCode.toInteger() : 1/' build.gradle
+          sed -i 's/versionName "[^"]*"/versionName project.hasProperty("versionName") ? project.versionName : "1.0.0"/' build.gradle
+          sed -i "s/minSdkVersion = .*/minSdkVersion = $MIN_SDK_VERSION/" ../variables.gradle
+          sed -i "s/targetSdkVersion = .*/targetSdkVersion = $TARGET_SDK_VERSION/" ../variables.gradle
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "RELEASE_FILE=${RELEASE_BASENAME}-${VERSION_NAME//./-}" >> "$GITHUB_ENV"
+
+      - name: Generate launcher and Play Store icons
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+          declare -A SIZES=([mipmap-mdpi]=48 [mipmap-hdpi]=72 [mipmap-xhdpi]=96 [mipmap-xxhdpi]=144 [mipmap-xxxhdpi]=192)
+          for DIR in "${!SIZES[@]}"; do
+            SIZE=${SIZES[$DIR]}
+            ICON_SIZE=$((SIZE * 72 / 100))
+            mkdir -p "android/app/src/main/res/$DIR"
+            convert public/link-deck.png -background none -resize "${ICON_SIZE}x${ICON_SIZE}" -gravity center -extent "${SIZE}x${SIZE}" "android/app/src/main/res/$DIR/ic_launcher.png"
+            cp "android/app/src/main/res/$DIR/ic_launcher.png" "android/app/src/main/res/$DIR/ic_launcher_round.png"
+            cp "android/app/src/main/res/$DIR/ic_launcher.png" "android/app/src/main/res/$DIR/ic_launcher_foreground.png"
+          done
+          mkdir -p release
+          convert public/link-deck.png -background none -resize 420x420 -gravity center -extent 512x512 release/playstore-icon.png
+
+      - name: Build debug APK
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        working-directory: android
+        run: ./gradlew assembleDebug -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
+
+      - name: Copy debug APK to release
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "release/${RELEASE_FILE}-debug.apk"
+
+      - name: Build release APK and AAB
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: android
+        run: ./gradlew assembleRelease bundleRelease -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
+
+      - name: Decode release keystore
+        id: keystore
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          test -n "$KEYSTORE_PASSWORD"
+          test -n "$KEY_ALIAS"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
+
+      - name: Detect keystore type
+        id: keystore_type
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          KS_TYPE=$(keytool -list -keystore android/app/release-keystore.jks -storepass:env KEYSTORE_PASSWORD 2>/dev/null | grep -i "Keystore type" | awk '{print $NF}')
+          echo "type=$KS_TYPE" >> "$GITHUB_OUTPUT"
+
+      - name: Sign release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ steps.keystore_type.outputs.type == 'PKCS12' && secrets.KEYSTORE_PASSWORD || secrets.KEY_PASSWORD }}
+        run: |
+          BUILD_TOOLS="${ANDROID_HOME}/build-tools/$(ls "${ANDROID_HOME}/build-tools" | sort -V | tail -1)"
+          UNSIGNED_APK=$(find android/app/build -name '*-release-unsigned.apk' | head -1)
+          "$BUILD_TOOLS/zipalign" -v 4 "$UNSIGNED_APK" "release/${RELEASE_FILE}.apk"
+          "$BUILD_TOOLS/apksigner" sign --ks android/app/release-keystore.jks --ks-pass env:KEYSTORE_PASSWORD --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASSWORD "release/${RELEASE_FILE}.apk"
+          "$BUILD_TOOLS/apksigner" verify --verbose "release/${RELEASE_FILE}.apk"
+
+      - name: Sign release AAB
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ steps.keystore_type.outputs.type == 'PKCS12' && secrets.KEYSTORE_PASSWORD || secrets.KEY_PASSWORD }}
+        run: |
+          UNSIGNED_AAB=$(find android/app/build -name '*-release.aab' | head -1)
+          STORE_PASS_FILE=$(mktemp)
+          KEY_PASS_FILE=$(mktemp)
+          trap 'rm -f "$STORE_PASS_FILE" "$KEY_PASS_FILE"' EXIT
+          printf '%s' "$KEYSTORE_PASSWORD" > "$STORE_PASS_FILE"
+          printf '%s' "$KEY_PASSWORD" > "$KEY_PASS_FILE"
+          jarsigner -keystore android/app/release-keystore.jks -storepass:file "$STORE_PASS_FILE" -keypass:file "$KEY_PASS_FILE" -signedjar "release/${RELEASE_FILE}.aab" "$UNSIGNED_AAB" "$KEY_ALIAS"
+          jarsigner -verify -verbose -certs "release/${RELEASE_FILE}.aab"
+
+      - name: Verify release folder
+        run: |
+          find release -maxdepth 1 -type f -print -exec ls -lh {} \;
+          test -s "$(find release -maxdepth 1 -name '*.apk' -type f | head -1)"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            test -s "$(find release -maxdepth 1 -name '*.aab' -type f | head -1)"
+          fi
+
+      - name: Commit generated files on Android branch
+        if: github.ref == 'refs/heads/main-android'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase --autostash
+          git add release/
+          git diff --cached --quiet || git commit -m "build: update Android release files [skip ci]"
+          git push
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-deck-android-${{ env.VERSION_NAME }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.apk
+            release/*.aab
+            release/playstore-icon.png
+
+      - name: Remove decoded keystore
+        if: always()
+        run: rm -f android/app/release-keystore.jks
