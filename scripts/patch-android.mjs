@@ -78,7 +78,14 @@ await write(
   resolve(res, 'drawable/link_deck_splash_icon.xml'),
   `<?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:gravity="center" android:width="160dp" android:height="160dp" android:drawable="@drawable/link_deck_splash_logo" />
+    <item android:gravity="center" android:width="160dp" android:height="160dp">
+        <inset
+            android:drawable="@drawable/link_deck_splash_logo"
+            android:insetLeft="22dp"
+            android:insetTop="22dp"
+            android:insetRight="22dp"
+            android:insetBottom="22dp" />
+    </item>
 </layer-list>`,
 );
 await mkdir(resolve(res, 'drawable-nodpi'), { recursive: true });
@@ -111,6 +118,7 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import android.view.View;
+import android.view.Gravity;
 import android.view.Window;
 import android.view.WindowInsetsController;
 import android.webkit.JavascriptInterface;
@@ -133,7 +141,7 @@ public class MainActivity extends BridgeActivity {
   private static final String KEY_ALIAS = "link_deck_biometric_key";
   private LinkDeckDatabase database;
   private boolean darkMode = true;
-  private ImageView launchOverlay;
+  private FrameLayout launchOverlay;
   private String sharedText = "";
 
   @Override
@@ -313,11 +321,14 @@ public class MainActivity extends BridgeActivity {
   }
 
   private void showLaunchOverlay() {
-    launchOverlay = new ImageView(this);
-    launchOverlay.setImageResource(R.drawable.link_deck_splash_logo);
-    launchOverlay.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-    launchOverlay.setPadding(96, 96, 96, 96);
+    launchOverlay = new FrameLayout(this);
     launchOverlay.setBackgroundColor(Color.parseColor("#0E1713"));
+    ImageView icon = new ImageView(this);
+    icon.setImageResource(R.drawable.link_deck_splash_logo);
+    icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+    int iconSize = Math.round(116 * getResources().getDisplayMetrics().density);
+    FrameLayout.LayoutParams iconLayout = new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER);
+    launchOverlay.addView(icon, iconLayout);
     addContentView(launchOverlay, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
   }
 

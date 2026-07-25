@@ -115,6 +115,7 @@ The generated shell provides:
 - system-browser URL opening;
 - Android Share-menu URL intake for review in the bookmark editor;
 - an Android 12+ launch theme and branded WebView transition;
+- a mask-safe splash inset and matching fixed-size transition logo so the brand is not cropped;
 - matching WebView, window, status-bar and navigation-bar colors;
 - dark icons on light system bars and white icons on dark system bars;
 - a white transparent notification icon named `ic_stat_link_deck`.
