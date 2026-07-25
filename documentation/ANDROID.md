@@ -52,11 +52,26 @@ npm run android:sync
 6. Apply minimum SDK 24, target SDK 35 and the configured version values.
 7. Generate launcher and Play Store images from `public/link-deck.png`.
 8. Apply native LinkDeck patches.
-9. Build a debug APK for `main-android`.
-10. Build and sign an APK and AAB for `v*` tags.
-11. Place output files in `release/` and upload them as workflow artifacts.
+9. Build release APK and AAB inputs on `main-android` and `v*` tags.
+10. Sign and verify both files when the signing secrets are complete.
+11. Publish clearly named unsigned APK/AAB fallbacks when signing is unavailable or fails.
+12. Place output files in `release/` and upload them as workflow artifacts.
 
 The workflow commits generated `main-android` artifacts back to `release/` with `[skip ci]`.
+
+Signed outputs use the current `versionName`, for example:
+
+```text
+release/link-deck-1-0-0.apk
+release/link-deck-1-0-0.aab
+```
+
+Unsigned fallbacks are named explicitly:
+
+```text
+release/link-deck-1-0-0-unsigned.apk
+release/link-deck-1-0-0-unsigned.aab
+```
 
 ## Signing secrets
 
