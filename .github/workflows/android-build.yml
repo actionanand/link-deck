@@ -20,6 +20,7 @@ env:
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/main-android' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -98,44 +99,51 @@ jobs:
           mkdir -p release
           convert public/link-deck.png -background none -resize 420x420 -gravity center -extent 512x512 release/playstore-icon.png
 
-      - name: Build debug APK
-        if: "!startsWith(github.ref, 'refs/tags/v')"
-        working-directory: android
-        run: ./gradlew assembleDebug -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
-
-      - name: Copy debug APK to release
-        if: "!startsWith(github.ref, 'refs/tags/v')"
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk "release/${RELEASE_FILE}-debug.apk"
+      - name: Clear previous Android release artifacts
+        run: |
+          mkdir -p release
+          rm -f release/*.apk release/*.aab release/*.apk.idsig
 
       - name: Build release APK and AAB
-        if: startsWith(github.ref, 'refs/tags/v')
         working-directory: android
         run: ./gradlew assembleRelease bundleRelease -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
 
       - name: Decode release keystore
         id: keystore
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          test -n "$KEYSTORE_BASE64"
-          test -n "$KEYSTORE_PASSWORD"
-          test -n "$KEY_ALIAS"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
+          if [[ -n "$KEYSTORE_BASE64" && -n "$KEYSTORE_PASSWORD" && -n "$KEY_ALIAS" ]]; then
+            if printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks; then
+              echo "available=true" >> "$GITHUB_OUTPUT"
+              echo "Release keystore decoded. Signed artifacts will be attempted."
+            else
+              rm -f android/app/release-keystore.jks
+              echo "available=false" >> "$GITHUB_OUTPUT"
+              echo "KEYSTORE_BASE64 could not be decoded. Unsigned artifacts will be published."
+            fi
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Signing secrets are incomplete. Unsigned artifacts will be published."
+          fi
 
       - name: Detect keystore type
         id: keystore_type
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.keystore.outputs.available == 'true'
+        continue-on-error: true
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           KS_TYPE=$(keytool -list -keystore android/app/release-keystore.jks -storepass:env KEYSTORE_PASSWORD 2>/dev/null | grep -i "Keystore type" | awk '{print $NF}')
           echo "type=$KS_TYPE" >> "$GITHUB_OUTPUT"
+          echo "Detected keystore type: $KS_TYPE"
 
       - name: Sign release APK
-        if: startsWith(github.ref, 'refs/tags/v')
+        id: sign_apk
+        if: steps.keystore.outputs.available == 'true'
+        continue-on-error: true
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -143,32 +151,70 @@ jobs:
         run: |
           BUILD_TOOLS="${ANDROID_HOME}/build-tools/$(ls "${ANDROID_HOME}/build-tools" | sort -V | tail -1)"
           UNSIGNED_APK=$(find android/app/build -name '*-release-unsigned.apk' | head -1)
-          "$BUILD_TOOLS/zipalign" -v 4 "$UNSIGNED_APK" "release/${RELEASE_FILE}.apk"
-          "$BUILD_TOOLS/apksigner" sign --ks android/app/release-keystore.jks --ks-pass env:KEYSTORE_PASSWORD --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASSWORD "release/${RELEASE_FILE}.apk"
-          "$BUILD_TOOLS/apksigner" verify --verbose "release/${RELEASE_FILE}.apk"
+          OUTPUT_APK="release/${RELEASE_FILE}.apk"
+          test -s "$UNSIGNED_APK"
+          rm -f "$OUTPUT_APK"
+          "$BUILD_TOOLS/zipalign" -v 4 "$UNSIGNED_APK" "$OUTPUT_APK"
+          "$BUILD_TOOLS/apksigner" sign --ks android/app/release-keystore.jks --ks-pass env:KEYSTORE_PASSWORD --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASSWORD "$OUTPUT_APK"
+          "$BUILD_TOOLS/apksigner" verify --verbose "$OUTPUT_APK"
+          echo "Signed APK created: $OUTPUT_APK"
+
+      - name: Copy unsigned release APK
+        if: steps.keystore.outputs.available != 'true' || steps.sign_apk.outcome == 'failure'
+        run: |
+          UNSIGNED_APK=$(find android/app/build -name '*-release-unsigned.apk' | head -1)
+          OUTPUT_APK="release/${RELEASE_FILE}-unsigned.apk"
+          test -s "$UNSIGNED_APK"
+          rm -f "release/${RELEASE_FILE}.apk" "$OUTPUT_APK"
+          cp "$UNSIGNED_APK" "$OUTPUT_APK"
+          echo "Unsigned APK created: $OUTPUT_APK"
 
       - name: Sign release AAB
-        if: startsWith(github.ref, 'refs/tags/v')
+        id: sign_aab
+        if: steps.keystore.outputs.available == 'true'
+        continue-on-error: true
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ steps.keystore_type.outputs.type == 'PKCS12' && secrets.KEYSTORE_PASSWORD || secrets.KEY_PASSWORD }}
         run: |
           UNSIGNED_AAB=$(find android/app/build -name '*-release.aab' | head -1)
+          OUTPUT_AAB="release/${RELEASE_FILE}.aab"
+          test -s "$UNSIGNED_AAB"
+          rm -f "$OUTPUT_AAB"
           STORE_PASS_FILE=$(mktemp)
           KEY_PASS_FILE=$(mktemp)
           trap 'rm -f "$STORE_PASS_FILE" "$KEY_PASS_FILE"' EXIT
           printf '%s' "$KEYSTORE_PASSWORD" > "$STORE_PASS_FILE"
           printf '%s' "$KEY_PASSWORD" > "$KEY_PASS_FILE"
-          jarsigner -keystore android/app/release-keystore.jks -storepass:file "$STORE_PASS_FILE" -keypass:file "$KEY_PASS_FILE" -signedjar "release/${RELEASE_FILE}.aab" "$UNSIGNED_AAB" "$KEY_ALIAS"
-          jarsigner -verify -verbose -certs "release/${RELEASE_FILE}.aab"
+          jarsigner -verbose -keystore android/app/release-keystore.jks -storepass:file "$STORE_PASS_FILE" -keypass:file "$KEY_PASS_FILE" -signedjar "$OUTPUT_AAB" "$UNSIGNED_AAB" "$KEY_ALIAS"
+          jarsigner -verify -verbose -certs "$OUTPUT_AAB"
+          echo "Signed AAB created: $OUTPUT_AAB"
 
-      - name: Verify release folder
+      - name: Copy unsigned release AAB
+        if: steps.keystore.outputs.available != 'true' || steps.sign_aab.outcome == 'failure'
         run: |
-          find release -maxdepth 1 -type f -print -exec ls -lh {} \;
-          test -s "$(find release -maxdepth 1 -name '*.apk' -type f | head -1)"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            test -s "$(find release -maxdepth 1 -name '*.aab' -type f | head -1)"
+          UNSIGNED_AAB=$(find android/app/build -name '*-release.aab' | head -1)
+          OUTPUT_AAB="release/${RELEASE_FILE}-unsigned.aab"
+          test -s "$UNSIGNED_AAB"
+          rm -f "release/${RELEASE_FILE}.aab" "$OUTPUT_AAB"
+          cp "$UNSIGNED_AAB" "$OUTPUT_AAB"
+          echo "Unsigned AAB created: $OUTPUT_AAB"
+
+      - name: Summarize and verify Android artifacts
+        run: |
+          echo "## Android artifact summary" >> "$GITHUB_STEP_SUMMARY"
+          find release -maxdepth 1 \( -name '*.apk' -o -name '*.aab' -o -name 'playstore-icon.png' \) -type f -print -exec ls -lh {} \;
+          APK_FILE=$(find release -maxdepth 1 -name '*.apk' -type f | head -1)
+          AAB_FILE=$(find release -maxdepth 1 -name '*.aab' -type f | head -1)
+          test -s "$APK_FILE"
+          test -s "$AAB_FILE"
+          echo "- APK: \`$APK_FILE\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- AAB: \`$AAB_FILE\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$APK_FILE" == *-unsigned.apk ]]; then
+            echo "- Signing: unsigned fallback" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Signing: signed and verified" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Commit generated files on Android branch

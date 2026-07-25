@@ -12,7 +12,7 @@ LinkDeck is a mobile-first, offline bookmark manager built with Angular 22 and C
 - PBKDF2 PIN protection and Android Keystore-backed strong biometric login
 - Android Share target and system-browser link opening
 - Branded Android 12+ splash, launcher icon and white notification small icon
-- GitHub Actions debug APK builds and signed APK/AAB builds for `v*` tags
+- GitHub Actions release APK/AAB builds with signed or unsigned fallback artifacts
 
 No application data is written to `localStorage` or `sessionStorage`.
 
@@ -50,8 +50,9 @@ npm run android:sync
 The workflow at `.github/workflows/android-build.yml`:
 
 - runs lint, tests and the production Angular build;
-- creates a debug APK on `main` and `main-android`;
-- builds and signs an APK and AAB for `v*` tags;
+- builds a release APK and AAB on `main-android` and `v*` tags;
+- signs both files when the GitHub signing secrets are available;
+- publishes clearly named unsigned APK/AAB fallbacks when signing is unavailable;
 - puts generated files in `release/`;
 - uploads the folder as a workflow artifact and attaches tag builds to a GitHub release.
 
