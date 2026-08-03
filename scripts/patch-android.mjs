@@ -7,6 +7,7 @@ const appId = 'com.actionanand.linkdeck.app';
 const res = resolve('android/app/src/main/res');
 const manifestPath = resolve('android/app/src/main/AndroidManifest.xml');
 const gradlePath = resolve('android/app/build.gradle');
+const proguardPath = resolve('android/app/proguard-rules.pro');
 const javaPath = resolve('android/app/src/main/java', ...appId.split('.'), 'MainActivity.java');
 
 async function write(path, contents) {
@@ -39,6 +40,13 @@ if (!manifest.includes('android.intent.action.SEND')) {
 await writeFile(manifestPath, manifest);
 
 let gradle = await readFile(gradlePath, 'utf8');
+gradle = gradle.replace(/minifyEnabled\s+false/, 'minifyEnabled true');
+if (!gradle.includes('shrinkResources true')) {
+  gradle = gradle.replace(
+    /minifyEnabled\s+true/,
+    'minifyEnabled true\n            shrinkResources true',
+  );
+}
 if (!gradle.includes('androidx.biometric:biometric')) {
   gradle = gradle.replace(
     /dependencies\s*\{/,
@@ -46,6 +54,16 @@ if (!gradle.includes('androidx.biometric:biometric')) {
   );
 }
 await writeFile(gradlePath, gradle);
+
+const webViewKeepRules =
+  '\n# LinkDeck exposes these methods to the Angular WebView at runtime.\n' +
+  '-keepclassmembers class * {\n' +
+  '    @android.webkit.JavascriptInterface <methods>;\n' +
+  '}\n';
+const existingProguardRules = await readFile(proguardPath, 'utf8');
+if (!existingProguardRules.includes('@android.webkit.JavascriptInterface <methods>')) {
+  await writeFile(proguardPath, existingProguardRules.trimEnd() + webViewKeepRules);
+}
 
 const styles = `<?xml version="1.0" encoding="utf-8"?>
 <resources>
