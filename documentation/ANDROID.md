@@ -46,16 +46,18 @@ npm run android:sync
 
 1. Install locked Angular dependencies with `npm ci`.
 2. Install the pinned Capacitor build tools.
-3. Run lint, unit tests and the production Angular build.
+3. Run lint and the production Angular build.
 4. Increment `android-version.json` on `main-android`.
 5. Generate and synchronize the Capacitor Android project.
-6. Apply minimum SDK 24, target SDK 35 and the configured version values.
+6. Apply minimum SDK 24, target SDK 36 and the configured version values.
 7. Generate launcher and Play Store images from `public/link-deck.png`.
 8. Apply native LinkDeck patches.
-9. Build release APK and AAB inputs on `main-android` and `v*` tags.
-10. Sign and verify both files when the signing secrets are complete.
-11. Publish clearly named unsigned APK/AAB fallbacks when signing is unavailable or fails.
-12. Place output files in `release/` and upload them as workflow artifacts.
+9. Enable R8 optimization and resource shrinking while preserving WebView bridge methods.
+10. Build release APK and AAB inputs on `main-android` and `v*` tags.
+11. Require and preserve the release R8 mapping file.
+12. Sign and verify both files when the signing secrets are complete.
+13. Publish clearly named unsigned APK/AAB fallbacks when signing is unavailable or fails.
+14. Place output files and the mapping in `release/` and upload them as workflow artifacts.
 
 The workflow commits generated `main-android` artifacts back to `release/` with `[skip ci]`.
 
@@ -119,6 +121,8 @@ The generated shell provides:
 - matching WebView, window, status-bar and navigation-bar colors;
 - dark icons on light system bars and white icons on dark system bars;
 - a white transparent notification icon named `ic_stat_link_deck`.
+- R8 release optimization, resource shrinking and preserved WebView bridge methods.
+- A version-specific deobfuscation mapping file retained with every release.
 
 The mobile navigation drawer is inset from both Android safe areas and does not extend into the status or gesture-navigation regions.
 

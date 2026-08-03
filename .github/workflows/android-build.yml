@@ -15,7 +15,7 @@ concurrency:
 
 env:
   MIN_SDK_VERSION: 24
-  TARGET_SDK_VERSION: 35
+  TARGET_SDK_VERSION: 36
   RELEASE_BASENAME: link-deck
 
 jobs:
@@ -102,11 +102,21 @@ jobs:
       - name: Clear previous Android release artifacts
         run: |
           mkdir -p release
-          rm -f release/*.apk release/*.aab release/*.apk.idsig
+          rm -f release/*.apk release/*.aab release/*.apk.idsig release/*-mapping.txt
 
       - name: Build release APK and AAB
         working-directory: android
         run: ./gradlew assembleRelease bundleRelease -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
+
+      - name: Preserve R8 deobfuscation mapping
+        run: |
+          MAPPING_SOURCE="android/app/build/outputs/mapping/release/mapping.txt"
+          MAPPING_TARGET="release/${RELEASE_FILE}-mapping.txt"
+          test -s "$MAPPING_SOURCE"
+          cp "$MAPPING_SOURCE" "$MAPPING_TARGET"
+          test -s "$MAPPING_TARGET"
+          echo "MAPPING_FILE=$MAPPING_TARGET" >> "$GITHUB_ENV"
+          echo "R8 mapping created: $MAPPING_TARGET"
 
       - name: Decode release keystore
         id: keystore
@@ -204,13 +214,15 @@ jobs:
       - name: Summarize and verify Android artifacts
         run: |
           echo "## Android artifact summary" >> "$GITHUB_STEP_SUMMARY"
-          find release -maxdepth 1 \( -name '*.apk' -o -name '*.aab' -o -name 'playstore-icon.png' \) -type f -print -exec ls -lh {} \;
+          find release -maxdepth 1 \( -name '*.apk' -o -name '*.aab' -o -name '*-mapping.txt' -o -name 'playstore-icon.png' \) -type f -print -exec ls -lh {} \;
           APK_FILE=$(find release -maxdepth 1 -name '*.apk' -type f | head -1)
           AAB_FILE=$(find release -maxdepth 1 -name '*.aab' -type f | head -1)
           test -s "$APK_FILE"
           test -s "$AAB_FILE"
+          test -s "$MAPPING_FILE"
           echo "- APK: \`$APK_FILE\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- AAB: \`$AAB_FILE\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- R8 mapping: \`$MAPPING_FILE\`" >> "$GITHUB_STEP_SUMMARY"
           if [[ "$APK_FILE" == *-unsigned.apk ]]; then
             echo "- Signing: unsigned fallback" >> "$GITHUB_STEP_SUMMARY"
           else
@@ -242,6 +254,7 @@ jobs:
           files: |
             release/*.apk
             release/*.aab
+            release/*-mapping.txt
             release/playstore-icon.png
 
       - name: Remove decoded keystore
